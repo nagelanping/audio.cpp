@@ -1,0 +1,45 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+PORT=${1:?usage: $0 <port>}
+[[ "$PORT" == <1-65535> && $# -eq 1 ]] || { print -u2 "Expected one port in 1..65535"; exit 2; }
+
+cd "${0:A:h}"
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES=0
+print -u2 "Drama3 WebUI/API: http://127.0.0.1:$PORT/"
+
+exec ./build/linux-cuda-release/bin/audiocpp_server \
+    --config /dev/stdin --port "$PORT" --log <<'JSON'
+{
+  "host": "127.0.0.1",
+  "backend": "cuda",
+  "device": 0,
+  "threads": 8,
+  "ui": true,
+  "lazy_load": false,
+  "max_loaded_models": 1,
+  "models": [
+    {
+      "id": "Jmica/Drama-3-GGUF",
+      "family": "fish_drama3",
+      "path": "/home/Si/AI/Models/Jmica/Drama-3-GGUF/drama-3-backbone-8bit-F32-routers-experts-Q4_K_S.gguf",
+      "task": "tts",
+      "mode": "streaming",
+      "session_options": {
+        "fish_drama3.disk_experts": "true",
+        "fish_drama3.expert_cache_size": "64",
+        "fish_drama3.disk_expert_read_threads": "4",
+        "fish_drama3.cpu_expert_layers": "0",
+        "fish_drama3.context_length": "8192"
+      },
+      "default_request_options": {
+        "max_tokens": 500,
+        "temperature": 1.0,
+        "top_p": 0.9,
+        "top_k": 4097,
+        "text_chunk_size": 128
+      }
+    }
+  ]
+}
+JSON

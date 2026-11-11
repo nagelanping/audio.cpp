@@ -94,8 +94,8 @@
   let instructions = '';
   let lyrics = '';
   let duration = 30;
-  let seed = 1234;
-      let maxTokens = 1024;
+  let seed = -1;
+      let maxTokens = 500;
   let asrMaxTokens = 0;
       let sourceFile: File | null = null;
       let videoFile: File | null = null;
@@ -1291,7 +1291,8 @@
     installed = true;
     localStorage.setItem('audiocpp.ui.model', next.id);
     if (initialize) {
-      chunkBudget = defaultChunkBudget(next.family);
+      chunkBudget = next.family === 'fish_audio' ? 200 : defaultChunkBudget(next.family);
+      if (next.family === 'fish_audio') maxTokens = 2048;
       resetParams();
     }
     configuredSelectionInitialized = true;

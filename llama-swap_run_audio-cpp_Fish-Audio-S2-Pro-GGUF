@@ -1,0 +1,34 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+PORT=${1:?usage: $0 <port>}
+[[ "$PORT" == <1-65535> && $# -eq 1 ]] || { print -u2 "Expected one port in 1..65535"; exit 2; }
+
+cd "${0:A:h}"
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES=0
+
+exec ./build/linux-cuda-release/bin/audiocpp_server \
+    --config /dev/stdin --port "$PORT" --log <<'JSON'
+{
+  "host": "127.0.0.1",
+  "backend": "cuda",
+  "device": 0,
+  "threads": 8,
+  "ui": true,
+  "lazy_load": false,
+  "max_loaded_models": 1,
+  "models": [
+    {
+      "id": "fish-s2-pro",
+      "family": "fish_audio",
+      "path": "/home/Si/AI/Models/audio-cpp/audio.cpp-gguf/Fish-Audio-S2-Pro-GGUF/fish-audio-s2-pro-q8_0.gguf",
+      "task": "tts",
+      "mode": "streaming",
+      "default_request_options": {
+        "max_tokens": 2048,
+        "text_chunk_size": 200
+      }
+    }
+  ]
+}
+JSON

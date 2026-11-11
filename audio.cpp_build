@@ -1,0 +1,32 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+cd "${0:A:h}"
+
+if [[ "$(git branch --show-current)" != personal ]]; then
+    print -u2 "Run this script on the personal branch."
+    exit 1
+fi
+if [[ -n "$(git status --porcelain)" ]]; then
+    print -u2 "Commit or stash local changes, and resolve any pending merge before updating."
+    exit 1
+fi
+
+git fetch --quiet upstream main
+if ! git merge --no-edit upstream/main; then
+    print -u2 "Upstream merge failed; build stopped. Resolve conflicts and commit, or run git merge --abort."
+    exit 1
+fi
+
+export CUDA_HOME=/opt/cuda
+export CUDAToolkit_ROOT="$CUDA_HOME"
+export CUDACXX="$CUDA_HOME/bin/nvcc"
+export PATH="$CUDA_HOME/bin:$PATH"
+
+# Keep Drama3 and S2-Pro in the same incremental build.
+if ! scripts/build_linux.sh \
+    --backend cuda --cuda-arch 120 --build-type Release --ccache \
+    --model-set custom --models fish_drama3,fish_audio --jobs 4 \
+    --target audiocpp_cli --target audiocpp_server --target audiocpp_gguf "$@"; then
+    print -u2 "Build failed. Build files were kept for an incremental retry."
+    exit 1
+fi

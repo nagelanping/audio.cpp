@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 
@@ -138,7 +139,14 @@ runtime::TaskResult Drama3Session::synthesize(const runtime::TaskRequest & reque
         sampling.top_p = runtime::parse_finite_float_option(effective.options, {"top_p"}).value_or(0.9F);
         sampling.top_k = runtime::parse_int_option(effective.options, {"top_k"}).value_or(4097);
         sampling.max_frames = runtime::parse_positive_i64_option(effective.options, {"max_tokens", "max_new_tokens"}, 1024);
-        seed = runtime::parse_u32_option(effective.options, {"seed"});
+        // -1 means "draw a random seed", matching the option other TTS families expose.
+        const auto requested_seed = runtime::parse_i64_option(effective.options, {"seed"});
+        if (requested_seed && *requested_seed != -1) {
+            if (*requested_seed < 0 || *requested_seed > std::numeric_limits<uint32_t>::max()) {
+                throw runtime::InvalidRequestError("seed must be -1 or an unsigned 32-bit integer");
+            }
+            seed = static_cast<uint32_t>(*requested_seed);
+        }
     } catch (const std::runtime_error & error) {
         throw runtime::InvalidRequestError(error.what());
     } catch (const std::logic_error & error) {

@@ -73,7 +73,7 @@
         "description": "Maximum generated acoustic frames per text chunk (about 21.5 frames/second).",
         "required": false,
         "min": 1,
-        "default": 1024
+        "default": 500
       },
       {
         "name": "text_chunk_size",
@@ -126,9 +126,10 @@
       {
         "name": "seed",
         "type": "int",
-        "description": "Reproducible native sampling seed.",
+        "description": "Reproducible native sampling seed; -1 chooses a random seed.",
         "required": false,
-        "min": 0
+        "min": -1,
+        "default": -1
       }
     ],
     "session": [
