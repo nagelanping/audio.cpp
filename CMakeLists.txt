@@ -91,6 +91,7 @@ set(ENGINE_DEFAULT_ENABLE_CUDA OFF)
 set(ENGINE_DEFAULT_ENABLE_HIP OFF)
 set(ENGINE_DEFAULT_ENABLE_VULKAN OFF)
 set(ENGINE_DEFAULT_ENABLE_WEBGPU OFF)
+set(ENGINE_DEFAULT_ENABLE_SYCL OFF)
 set(ENGINE_DEFAULT_ENABLE_METAL OFF)
 set(ENGINE_DEFAULT_ENABLE_LLAMAFILE ON)
 set(ENGINE_DEFAULT_ENABLE_CUDA_GRAPHS ON)
@@ -110,6 +111,9 @@ endif()
 if (DEFINED GGML_WEBGPU)
     set(ENGINE_DEFAULT_ENABLE_WEBGPU ${GGML_WEBGPU})
 endif()
+if (DEFINED GGML_SYCL)
+    set(ENGINE_DEFAULT_ENABLE_SYCL ${GGML_SYCL})
+endif()
 if (DEFINED GGML_METAL)
     set(ENGINE_DEFAULT_ENABLE_METAL ${GGML_METAL})
 endif()
@@ -124,6 +128,7 @@ option(ENGINE_ENABLE_CUDA "Build ggml with CUDA backend support" ${ENGINE_DEFAUL
 option(ENGINE_ENABLE_HIP "Build ggml with HIP/ROCm backend support" ${ENGINE_DEFAULT_ENABLE_HIP})
 option(ENGINE_ENABLE_VULKAN "Build ggml with Vulkan backend support" ${ENGINE_DEFAULT_ENABLE_VULKAN})
 option(ENGINE_ENABLE_WEBGPU "Build ggml with WebGPU backend support" ${ENGINE_DEFAULT_ENABLE_WEBGPU})
+option(ENGINE_ENABLE_SYCL "Build ggml with SYCL backend support (Intel oneAPI)" ${ENGINE_DEFAULT_ENABLE_SYCL})
 option(ENGINE_ENABLE_METAL "Build ggml with Metal backend support" ${ENGINE_DEFAULT_ENABLE_METAL})
 option(ENGINE_ENABLE_LLAMAFILE "Build ggml with llamafile SGEMM support" ${ENGINE_DEFAULT_ENABLE_LLAMAFILE})
 option(ENGINE_ENABLE_CUDA_GRAPHS "Enable ggml CUDA graphs support" ${ENGINE_DEFAULT_ENABLE_CUDA_GRAPHS})
@@ -199,6 +204,9 @@ if (ENGINE_ENABLE_VULKAN)
 endif()
 if (ENGINE_ENABLE_WEBGPU)
     string(APPEND AUDIOCPP_BUILD_BACKENDS ",webgpu")
+endif()
+if (ENGINE_ENABLE_SYCL)
+    string(APPEND AUDIOCPP_BUILD_BACKENDS ",sycl")
 endif()
 if (ENGINE_ENABLE_METAL)
     string(APPEND AUDIOCPP_BUILD_BACKENDS ",metal")
@@ -396,6 +404,10 @@ set(GGML_CUDA ${ENGINE_ENABLE_CUDA} CACHE BOOL "Build ggml with CUDA backend sup
 set(GGML_HIP ${ENGINE_ENABLE_HIP} CACHE BOOL "Build ggml with HIP backend support" FORCE)
 set(GGML_VULKAN ${ENGINE_ENABLE_VULKAN} CACHE BOOL "Build ggml with Vulkan backend support" FORCE)
 set(GGML_WEBGPU ${ENGINE_ENABLE_WEBGPU} CACHE BOOL "Build ggml with WebGPU backend support" FORCE)
+set(GGML_SYCL ${ENGINE_ENABLE_SYCL} CACHE BOOL "Build ggml with SYCL backend support" FORCE)
+if (ENGINE_ENABLE_SYCL)
+    set(GGML_SYCL_F16 ON CACHE BOOL "ggml: run SYCL oneDNN matmuls in F16")
+endif()
 set(GGML_METAL ${ENGINE_ENABLE_METAL} CACHE BOOL "Build ggml with Metal backend support" FORCE)
 set(GGML_LLAMAFILE ${ENGINE_ENABLE_LLAMAFILE} CACHE BOOL "Build ggml with llamafile SGEMM support" FORCE)
 set(GGML_CUDA_GRAPHS ${ENGINE_ENABLE_CUDA_GRAPHS} CACHE BOOL "Enable ggml CUDA graphs support" FORCE)
@@ -521,6 +533,8 @@ add_library(engine_core OBJECT
     src/framework/core/attention_fallback.cpp
     src/framework/core/deferred_tensor_writer.cpp
     src/framework/core/disk_expert_weight_store.cpp
+    src/framework/core/graph_workspace.cpp
+    src/framework/core/prepared_graph.cpp
     src/framework/core/execution_context.cpp
     src/framework/core/host_memory.cpp
     src/framework/core/load_progress.cpp
@@ -606,6 +620,8 @@ add_library(engine_core OBJECT
     src/framework/modules/streaming_conv_modules.cpp
     src/framework/modules/attention/positional_encoding.cpp
     src/framework/modules/feed_forward_modules.cpp
+    src/framework/modules/moe_module.cpp
+    src/framework/modules/staged_moe_runtime.cpp
     src/framework/modules/attention/self_attention.cpp
     src/framework/modules/attention/longformer_attention.cpp
     src/framework/modules/attention/longformer_attention_gpu.cpp
@@ -618,6 +634,8 @@ add_library(engine_core OBJECT
     src/framework/modules/transformers/decoder.cpp
     src/framework/modules/transformers/causal_decoder.cpp
     src/framework/modules/transformers/causal_decoder_runtime.cpp
+    src/framework/modules/transformers/dit.cpp
+    src/framework/modules/transformers/dit_runtime.cpp
     src/framework/modules/speech_encoders/lfm3_audio_encoder_runtime.cpp
     src/framework/modules/speech_encoders/rope_transformer_encoder_runtime.cpp
     src/framework/modules/transformers/lfm_decoder_runtime.cpp
@@ -629,6 +647,7 @@ add_library(engine_core OBJECT
     src/framework/modules/conditioning_modules.cpp
     src/framework/modules/conformer_modules.cpp
     src/framework/modules/ebranchformer_modules.cpp
+    src/framework/sampling/device_denoiser_runtime.cpp
     src/framework/sampling/flow_sampler_runtime.cpp
     src/framework/modules/predictor_modules.cpp
     src/framework/modules/positional_modules.cpp
@@ -952,6 +971,7 @@ audiocpp_add_model(omnivoice
         src/models/omnivoice/audio_tokenizer.cpp
         src/models/omnivoice/prompt_builder.cpp
         src/models/omnivoice/generator.cpp
+        src/models/omnivoice/rknn_generator.cpp
         src/models/omnivoice/postprocess.cpp
         src/models/omnivoice/session.cpp
         src/models/omnivoice/loader.cpp
@@ -1121,7 +1141,7 @@ audiocpp_add_model(maya1
 
 audiocpp_add_model(parakeet_tdt
     SOURCES
-        src/community_models/parakeet_tdt/implementation.cpp
+        src/community_models/parakeet_tdt/routing.cpp
         src/community_models/parakeet_tdt/predictor.cpp
         src/community_models/parakeet_tdt/assets.cpp
         src/community_models/parakeet_tdt/bark3.cpp
@@ -1173,6 +1193,7 @@ audiocpp_add_model(sanotts
         src/community_models/sanotts/piper_runtime.cpp
         src/community_models/sanotts/runtime.cpp
         src/community_models/sanotts/session.cpp
+        src/community_models/sanotts/word_timestamps.cpp
     INCLUDES
         engine/community_models/sanotts/session.h
     LOADERS
@@ -1436,6 +1457,21 @@ audiocpp_add_model(neutts
         engine/models/neutts/session.h
     LOADERS
         engine::models::neutts::make_neutts_loader
+)
+
+audiocpp_add_model(moss_soundeffect
+    SOURCES
+        src/models/moss_soundeffect/assets.cpp
+        src/models/moss_soundeffect/dit.cpp
+        src/models/moss_soundeffect/vae.cpp
+        src/models/moss_soundeffect/text_encoder.cpp
+        src/models/moss_soundeffect/session.cpp
+    INCLUDES
+        engine/models/moss_soundeffect/session.h
+    LOADERS
+        engine::models::moss_soundeffect::make_moss_soundeffect_loader
+    OBJECT_LIBRARIES
+        utf8proc_vendor
 )
 
 audiocpp_add_model(echo_tts
@@ -2416,6 +2452,18 @@ audiocpp_add_model(niagara_asr
         engine/models/niagara_asr/weights.h
     LOADERS
         engine::models::niagara_asr::make_niagara_asr_loader
+)
+
+audiocpp_add_model(edda_asr
+    SOURCES
+        src/community_models/edda_asr/assets.cpp
+        src/community_models/edda_asr/weights.cpp
+        src/community_models/edda_asr/runtime.cpp
+        src/community_models/edda_asr/session.cpp
+    INCLUDES
+        engine/community_models/edda_asr/model.h
+    LOADERS
+        engine::community_models::edda_asr::make_edda_asr_loader
 )
 
 audiocpp_add_model(whistle_asr
@@ -3697,6 +3745,11 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         target_link_libraries(test-backend-ops PRIVATE ggml Threads::Threads)
     endif()
 
+    if (ENGINE_BUILD_MODEL_TESTS AND moss_soundeffect IN_LIST AUDIOCPP_LINKED_MODELS)
+        add_executable(moss_soundeffect_parity tests/moss_soundeffect/validate_reference.cpp)
+        target_link_libraries(moss_soundeffect_parity PRIVATE engine_runtime ggml)
+    endif()
+
     if (ENGINE_BUILD_MODEL_TESTS AND heartmula IN_LIST AUDIOCPP_LINKED_MODELS)
         add_executable(heartmula_codec_lifecycle tests/heartmula/codec_lifecycle.cpp)
         target_link_libraries(heartmula_codec_lifecycle PRIVATE engine_runtime ggml)
@@ -3764,8 +3817,21 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         endif()
     endif()
 
+    add_engine_unittest(model_routing_test tests/unittests/test_model_routing.cpp)
+    add_test(NAME model_routing_test COMMAND model_routing_test
+        --log ${CMAKE_CURRENT_BINARY_DIR}/model_routing_test.log)
     add_engine_unittest(ctc_host_decoder_test tests/unittests/test_ctc_host_decoder.cpp)
     add_test(NAME ctc_host_decoder_test COMMAND ctc_host_decoder_test)
+    add_engine_unittest(device_denoiser_runtime_test tests/unittests/test_device_denoiser_runtime.cpp)
+    add_test(NAME device_denoiser_runtime_test COMMAND device_denoiser_runtime_test
+        --log ${CMAKE_CURRENT_BINARY_DIR}/device_denoiser_runtime_test.log)
+    add_engine_unittest(dit_runtime_test tests/unittests/test_dit_runtime.cpp)
+    add_test(NAME dit_runtime_test COMMAND dit_runtime_test
+        --log ${CMAKE_CURRENT_BINARY_DIR}/dit_runtime_test.log)
+    add_engine_unittest(prepared_graph_test tests/unittests/test_prepared_graph.cpp)
+    target_include_directories(prepared_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/ggml/src)
+    add_test(NAME prepared_graph_test COMMAND prepared_graph_test
+        --log ${CMAKE_CURRENT_BINARY_DIR}/prepared_graph_test.log)
     add_engine_unittest(rope_transformer_encoder_test tests/unittests/test_rope_transformer_encoder.cpp)
     add_test(NAME rope_transformer_encoder_test COMMAND rope_transformer_encoder_test)
     add_engine_unittest(shared_weight_cache_test tests/unittests/test_shared_weight_cache.cpp)
@@ -3802,6 +3868,12 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         add_engine_unittest(sanotts_neon_decoder_test tests/unittests/test_sanotts_neon_decoder.cpp)
         target_include_directories(sanotts_neon_decoder_test PRIVATE tests/unittests src/community_models/sanotts)
         add_test(NAME sanotts_neon_decoder_test COMMAND sanotts_neon_decoder_test)
+    endif()
+    if (ENGINE_BUILD_MODEL_TESTS AND sanotts IN_LIST AUDIOCPP_LINKED_MODELS)
+        add_engine_unittest(sanotts_word_timestamps_test tests/unittests/test_sanotts_word_timestamps.cpp)
+        target_sources(sanotts_word_timestamps_test PRIVATE src/community_models/sanotts/word_timestamps.cpp)
+        target_include_directories(sanotts_word_timestamps_test PRIVATE tests/unittests src/community_models/sanotts)
+        add_test(NAME sanotts_word_timestamps_test COMMAND sanotts_word_timestamps_test)
     endif()
     if (ENGINE_BUILD_MODEL_TESTS AND open_wake_word IN_LIST AUDIOCPP_LINKED_MODELS)
         add_engine_unittest(open_wake_word_runtime_test tests/open_wake_word/test_runtime_parity.cpp)
@@ -3908,6 +3980,12 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
     if(yue2 IN_LIST AUDIOCPP_LINKED_MODELS)
         add_engine_unittest(yue2_request_test tests/yue2/request_test.cpp)
         add_test(NAME yue2_request_test COMMAND yue2_request_test)
+        add_engine_unittest(yue2_attention_layout_test tests/yue2/attention_layout_test.cpp)
+        add_test(NAME yue2_attention_layout_test COMMAND yue2_attention_layout_test)
+        add_engine_unittest(yue2_nar_conditioning_test tests/yue2/nar_conditioning_test.cpp)
+        add_test(NAME yue2_nar_conditioning_test COMMAND yue2_nar_conditioning_test)
+        add_engine_unittest(yue2_nar_windowing_test tests/yue2/nar_windowing_test.cpp)
+        add_test(NAME yue2_nar_windowing_test COMMAND yue2_nar_windowing_test)
     endif()
 
     # Registered here rather than in the extended block below so it runs in the
@@ -3951,6 +4029,12 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         add_engine_unittest(granite5asr_ctc_timestamps_test tests/granite5asr/test_ctc_timestamps.cpp)
         target_include_directories(granite5asr_ctc_timestamps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unittests)
         add_test(NAME granite5asr_ctc_timestamps_test COMMAND granite5asr_ctc_timestamps_test)
+    endif()
+
+    if (sense_asr IN_LIST AUDIOCPP_LINKED_MODELS)
+        add_engine_unittest(sense_asr_word_timestamps_test tests/sense_asr/test_word_timestamps.cpp)
+        target_include_directories(sense_asr_word_timestamps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unittests)
+        add_test(NAME sense_asr_word_timestamps_test COMMAND sense_asr_word_timestamps_test)
     endif()
 
     if (ENGINE_BUILD_EXTENDED_TESTS AND ENGINE_ENABLE_VULKAN)
@@ -4298,6 +4382,9 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         add_engine_unittest(snake_beta_test tests/unittests/test_snake_beta.cpp)
         add_test(NAME snake_beta_test COMMAND snake_beta_test --log)
 
+        add_engine_unittest(moe_module_test tests/unittests/test_moe_module.cpp)
+        add_test(NAME moe_module_test COMMAND moe_module_test --log)
+
         add_engine_unittest(disk_expert_weight_store_test tests/unittests/test_disk_expert_weight_store.cpp)
         if (ENGINE_ENABLE_OPENMP)
             target_link_libraries(disk_expert_weight_store_test PRIVATE OpenMP::OpenMP_CXX)
@@ -4612,6 +4699,7 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
 
         if(fish_drama3 IN_LIST AUDIOCPP_LINKED_MODELS)
             add_engine_unittest(fish_drama3_backbone_allocation_test tests/community_models/fish_drama3/backbone_allocation_test.cpp)
+            target_include_directories(fish_drama3_backbone_allocation_test PRIVATE external/ggml/src)
             add_test(NAME fish_drama3_backbone_allocation_test COMMAND fish_drama3_backbone_allocation_test)
             add_engine_unittest(fish_drama3_codec_source_test tests/community_models/fish_drama3/codec_source_test.cpp)
             add_test(NAME fish_drama3_codec_source_test COMMAND fish_drama3_codec_source_test)
@@ -5148,6 +5236,7 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
 
         if (dots_tts IN_LIST AUDIOCPP_LINKED_MODELS)
         add_engine_unittest(dots_tts_vocoder_parity tests/dots_tts/dots_tts_vocoder_parity.cpp)
+        add_engine_unittest(dots_tts_flow_parity tests/dots_tts/dots_tts_flow_parity.cpp)
         endif()
 
         # Needs the GGUF and a PyTorch reference dump, so it is driven by hand
