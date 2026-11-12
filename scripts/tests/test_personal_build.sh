@@ -90,5 +90,74 @@ expect_failure
 git -C "$TMP/personal" rev-parse --verify MERGE_HEAD > /dev/null
 grep -Fq "Resolve conflicts" "$TMP/output"
 expect_failure
+git -C "$TMP/personal" merge --abort
 
-echo "PASS: clean merge, build arguments, dirty tree, branch, fetch/build failures, and conflicts"
+# Only generated-bundle conflicts may be rebuilt and committed automatically.
+mkdir -p "$TMP/upstream/webui/native/dist" "$TMP/bin"
+echo base > "$TMP/upstream/webui/native/dist/index.html"
+echo personal > "$TMP/upstream/shared"
+printf '/build/\nnode_modules/\n' > "$TMP/upstream/.gitignore"
+git -C "$TMP/upstream" add .
+git -C "$TMP/upstream" commit -qm "add WebUI fixture"
+git -C "$TMP/personal" fetch -q upstream
+git -C "$TMP/personal" merge -q --no-edit upstream/main
+echo personal > "$TMP/personal/webui/native/dist/index.html"
+echo personal-source > "$TMP/personal/webui/native/personal-source"
+git -C "$TMP/personal" add .
+git -C "$TMP/personal" commit -qm "personal WebUI"
+echo upstream > "$TMP/upstream/webui/native/dist/index.html"
+echo upstream-source > "$TMP/upstream/webui/native/upstream-source"
+git -C "$TMP/upstream" add .
+git -C "$TMP/upstream" commit -qm "upstream WebUI"
+cat > "$TMP/bin/npm" <<'NPM'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == "run build" ]]
+echo called > "$NPM_LOG"
+case "${NPM_MODE:-success}" in
+    fail) exit 1 ;;
+    noop) exit 0 ;;
+    empty) : > dist/index.html; exit 0 ;;
+esac
+cat personal-source upstream-source > dist/index.html
+NPM
+chmod +x "$TMP/bin/npm"
+export PATH="$TMP/bin:$PATH" NPM_LOG="$TMP/npm.log"
+before_merge="$(git -C "$TMP/personal" rev-parse HEAD)"
+
+# Missing dependencies, failed builds, and stale output must preserve the merge.
+expect_failure
+[[ ! -e "$NPM_LOG" ]]
+git -C "$TMP/personal" rev-parse --verify MERGE_HEAD > /dev/null
+git -C "$TMP/personal" merge --abort
+mkdir -p "$TMP/personal/webui/native/node_modules"
+for mode in fail noop empty; do
+    export NPM_MODE="$mode"
+    expect_failure
+    [[ "$(git -C "$TMP/personal" rev-parse HEAD)" == "$before_merge" ]]
+    [[ -n "$(git -C "$TMP/personal" diff --name-only --diff-filter=U)" ]]
+    git -C "$TMP/personal" rev-parse --verify MERGE_HEAD > /dev/null
+    git -C "$TMP/personal" merge --abort
+done
+unset NPM_MODE
+run_build
+[[ "$(git -C "$TMP/personal" show HEAD:webui/native/dist/index.html)" == $'personal-source\nupstream-source' ]]
+[[ "$(git -C "$TMP/personal" rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]]
+[[ -z "$(git -C "$TMP/personal" status --porcelain)" ]]
+[[ -e "$BUILD_LOG" ]]
+if git -C "$TMP/personal" rev-parse --verify MERGE_HEAD 2>/dev/null; then exit 1; fi
+
+# A bundle conflict alongside a source conflict must never invoke npm.
+echo personal-again > "$TMP/personal/webui/native/dist/index.html"
+echo personal-again > "$TMP/personal/shared"
+git -C "$TMP/personal" commit -qam "personal mixed conflict"
+echo upstream-again > "$TMP/upstream/webui/native/dist/index.html"
+echo upstream-again > "$TMP/upstream/shared"
+git -C "$TMP/upstream" commit -qam "upstream mixed conflict"
+rm -f "$NPM_LOG"
+expect_failure
+[[ ! -e "$NPM_LOG" ]]
+[[ "$(git -C "$TMP/personal" diff --name-only --diff-filter=U | wc -l)" -eq 2 ]]
+git -C "$TMP/personal" rev-parse --verify MERGE_HEAD > /dev/null
+
+echo "PASS: clean merge, build arguments, safety guards, conflicts, and WebUI rebuild recovery"

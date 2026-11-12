@@ -13,8 +13,28 @@ fi
 
 git fetch --quiet upstream main
 if ! git merge --no-edit upstream/main; then
-    print -u2 "Upstream merge failed; build stopped. Resolve conflicts and commit, or run git merge --abort."
-    exit 1
+    if ! git rev-parse -q --verify MERGE_HEAD >/dev/null ||
+        [[ "$(git diff --name-only --diff-filter=U)" != webui/native/dist/index.html ]]; then
+        print -u2 "Upstream merge failed; build stopped. Resolve conflicts and commit, or run git merge --abort."
+        exit 1
+    fi
+
+    print "Only the generated WebUI bundle conflicts; rebuilding from merged source."
+    if ! command -v npm >/dev/null || [[ ! -d webui/native/node_modules ]]; then
+        print -u2 "WebUI rebuild requires npm and installed webui/native dependencies. Merge left pending."
+        exit 1
+    fi
+    if ! (cd webui/native && npm run build); then
+        print -u2 "WebUI rebuild failed. Merge left pending; resolve and commit, or run git merge --abort."
+        exit 1
+    fi
+    if [[ ! -s webui/native/dist/index.html ]] ||
+        grep -qE '^(<<<<<<< |=======|>>>>>>> )' webui/native/dist/index.html; then
+        print -u2 "WebUI bundle is missing, empty, or still contains conflict markers. Merge left pending."
+        exit 1
+    fi
+    git add -- webui/native/dist/index.html
+    git commit --no-edit
 fi
 
 export CUDA_HOME=/opt/cuda
